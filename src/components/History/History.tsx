@@ -1,20 +1,15 @@
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import { selectHistory } from "../../store/download/selectors";
+import { downloadActions } from "../../store/download";
 import "./History.scss";
 
-type DownloadHistory = {
-  url: string;
-  title?: string;
-  output_path: string;
-  bitrate: number;
-  timestamp: string;
-  duration?: number;
-};
+export const History = () => {
+  const dispatch = useAppDispatch();
+  const history = useAppSelector(selectHistory);
 
-type Props = {
-  history: DownloadHistory[];
-  onClear: () => void;
-};
-
-export const History = ({ history, onClear }: Props) => {
+  const handleClear = () => {
+    dispatch(downloadActions.clearHistory());
+  };
   const formatDate = (timestamp: string) => {
     try {
       const date = new Date(timestamp);
@@ -39,7 +34,7 @@ export const History = ({ history, onClear }: Props) => {
     <div className="history">
       <div className="history__header">
         <h2 className="history__title">Download History</h2>
-        <button className="history__clear-btn" onClick={onClear}>
+        <button className="history__clear-btn" onClick={handleClear}>
           Clear History
         </button>
       </div>

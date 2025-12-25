@@ -1,35 +1,33 @@
 import { useEffect } from "react";
 import { open } from "@tauri-apps/api/dialog";
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import {
+  selectYoutubeUrl,
+  selectOutputFolder,
+  selectBitrate,
+  selectIsDownloading,
+} from "../../store/download/selectors";
+import { downloadActions } from "../../store/download";
 import "./UrlInput.scss";
 
-type Props = {
-  url: string;
-  outputFolder: string | null;
-  bitrate: number;
-  onUrlChange: (url: string) => void;
-  onOutputFolderSelect: (folderPath: string) => void;
-  onBitrateChange: (bitrate: number) => void;
-  onDownload?: () => void;
-  disabled?: boolean;
-};
+export const UrlInput = () => {
+  const dispatch = useAppDispatch();
+  const url = useAppSelector(selectYoutubeUrl);
+  const outputFolder = useAppSelector(selectOutputFolder);
+  const bitrate = useAppSelector(selectBitrate);
+  const disabled = useAppSelector(selectIsDownloading);
 
-export const UrlInput = ({ 
-  url, 
-  outputFolder,
-  bitrate,
-  onUrlChange, 
-  onOutputFolderSelect,
-  onBitrateChange,
-  onDownload, 
-  disabled = false 
-}: Props) => {
+  const handleDownload = () => {
+    dispatch(downloadActions.downloadFromYoutube(url, outputFolder || "", bitrate));
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onUrlChange(e.target.value);
+    dispatch(downloadActions.setYoutubeUrl(e.target.value));
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && onDownload && url.trim() && outputFolder && !disabled) {
-      onDownload();
+    if (e.key === "Enter" && url.trim() && outputFolder && !disabled) {
+      handleDownload();
     }
   };
 
@@ -48,7 +46,8 @@ export const UrlInput = ({
         const folderPath = Array.isArray(selected) ? selected[0] : selected;
         console.log("Folder selected:", folderPath);
         if (folderPath) {
-          onOutputFolderSelect(folderPath);
+          dispatch(downloadActions.setOutputFolder(folderPath));
+          await dispatch(downloadActions.savePreferences(url, folderPath, bitrate));
           console.log("Output folder set to:", folderPath);
         }
       } else {
@@ -59,6 +58,11 @@ export const UrlInput = ({
     }
   };
 
+  const handleBitrateChange = async (newBitrate: number) => {
+    dispatch(downloadActions.setBitrate(newBitrate));
+    await dispatch(downloadActions.savePreferences(url, outputFolder, newBitrate));
+  };
+
   const canDownload = Boolean(url.trim() && outputFolder && !disabled);
   
   useEffect(() => {
@@ -67,9 +71,8 @@ export const UrlInput = ({
       outputFolder, 
       disabled, 
       canDownload,
-      hasOnDownload: !!onDownload 
     });
-  }, [url, outputFolder, disabled, onDownload]);
+  }, [url, outputFolder, disabled]);
 
   return (
     <div className="url-input">
@@ -98,7 +101,7 @@ export const UrlInput = ({
                 className={`url-input__bitrate-btn ${
                   bitrate === option ? "url-input__bitrate-btn--active" : ""
                 }`}
-                onClick={() => onBitrateChange(option)}
+                onClick={() => handleBitrateChange(option)}
                 disabled={disabled}
               >
                 {option}
@@ -136,24 +139,17 @@ export const UrlInput = ({
         <button
           type="button"
           className="url-input__download-btn"
-          onClick={async (e) => {
+          onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
             console.log("Start Download button clicked", { 
               disabled, 
-              canDownload, 
-              hasOnDownload: !!onDownload,
+              canDownload,
               url: url.trim(),
               outputFolder,
               urlLength: url.trim().length,
               hasOutputFolder: !!outputFolder
             });
-            
-            if (!onDownload) {
-              console.error("onDownload handler is not provided!");
-              alert("Download handler is not available. Please refresh the app.");
-              return;
-            }
             
             if (!canDownload) {
               console.warn("Download blocked - requirements not met:", {
@@ -165,15 +161,9 @@ export const UrlInput = ({
               return;
             }
             
-            try {
-              console.log("Calling onDownload handler...");
-              await onDownload();
-              console.log("onDownload handler completed");
-            } catch (error) {
-              console.error("Error in onDownload handler:", error);
-            }
+            handleDownload();
           }}
-          disabled={!canDownload || !onDownload}
+          disabled={!canDownload}
           title={canDownload ? "Start Download" : "Enter URL and select output folder"}
         >
           Start Download

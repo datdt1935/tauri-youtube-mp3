@@ -1,25 +1,29 @@
+import { useAppSelector } from "../../store/hooks";
+import {
+  selectIsDownloading,
+  selectDownloadProgress,
+  selectDownloadStatus,
+  selectIsPlaylist,
+  selectCurrentSong,
+  selectTotalSongs,
+  selectSongProgress,
+  selectCurrentTitle,
+} from "../../store/download/selectors";
 import "./Progress.scss";
 
-type Props = {
-  progress: number;
-  status: string;
-  // Playlist-specific props
-  isPlaylist?: boolean;
-  currentSong?: number;
-  totalSongs?: number;
-  songProgress?: number;
-  currentTitle?: string;
-};
+export const Progress = () => {
+  const isDownloading = useAppSelector(selectIsDownloading);
+  const progress = useAppSelector(selectDownloadProgress);
+  const status = useAppSelector(selectDownloadStatus);
+  const isPlaylist = useAppSelector(selectIsPlaylist);
+  const currentSong = useAppSelector(selectCurrentSong);
+  const totalSongs = useAppSelector(selectTotalSongs);
+  const songProgress = useAppSelector(selectSongProgress);
+  const currentTitle = useAppSelector(selectCurrentTitle);
 
-export const Progress = ({ 
-  progress, 
-  status, 
-  isPlaylist = false,
-  currentSong,
-  totalSongs,
-  songProgress = 0,
-  currentTitle
-}: Props) => {
+  if (!isDownloading) {
+    return null;
+  }
   return (
     <div className="progress">
       <div className="progress__header">
@@ -38,7 +42,7 @@ export const Progress = ({
       </div>
 
       {/* Playlist summary info */}
-      {isPlaylist && currentSong && totalSongs && (
+      {isPlaylist && currentSong !== null && totalSongs !== null && (
         <div className="progress__playlist-info">
           <p className="progress__playlist-summary">
             Song {currentSong} of {totalSongs}
@@ -47,7 +51,7 @@ export const Progress = ({
       )}
 
       {/* Current song progress bar (for playlists) */}
-      {isPlaylist && currentSong && totalSongs && (
+      {isPlaylist && currentSong !== null && totalSongs !== null && (
         <div className="progress__song-section">
           <div className="progress__song-header">
             <span className="progress__song-title">
