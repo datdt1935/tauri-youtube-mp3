@@ -1,0 +1,94 @@
+@use "../../styles/variables" as *;
+
+.history {
+  padding: 1.5rem;
+  background: $color-surface;
+  border-radius: $border-radius;
+  border: 1px solid $color-border;
+
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: $color-text;
+  }
+
+  &__clear-btn {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    color: $color-text-secondary;
+    border: 1px solid $color-border;
+    border-radius: $border-radius-sm;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      background: $color-background;
+      color: $color-text;
+    }
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  &__item {
+    padding: 0.75rem;
+    background: $color-background;
+    border-radius: $border-radius-sm;
+    border: 1px solid $color-border;
+  }
+
+  &__item-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  &__item-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  &__title-text {
+    flex: 1;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: $color-text;
+    word-break: break-all;
+  }
+
+  &__bitrate {
+    font-size: 0.85rem;
+    color: $color-primary;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  &__item-meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: $color-text-secondary;
+  }
+
+  &__timestamp,
+  &__duration {
+    white-space: nowrap;
+  }
+}
+

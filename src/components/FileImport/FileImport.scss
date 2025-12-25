@@ -1,0 +1,61 @@
+@use "../../styles/variables" as *;
+
+.file-import {
+  padding: 1.5rem;
+  background: $color-surface;
+  border-radius: $border-radius;
+  border: 1px solid $color-border;
+
+  &__title {
+    margin: 0 0 1rem 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: $color-text;
+  }
+
+  &__content {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  &__selected {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem;
+    background: $color-background;
+    border-radius: $border-radius-sm;
+  }
+
+  &__file-name {
+    flex: 1;
+    font-size: 0.9rem;
+    color: $color-text-secondary;
+    word-break: break-all;
+  }
+
+  &__select-btn,
+  &__change-btn {
+    padding: 0.75rem 1.5rem;
+    background: $color-primary;
+    color: white;
+    border: none;
+    border-radius: $border-radius-sm;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover:not(:disabled) {
+      background: $color-primary-dark;
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+}
+
