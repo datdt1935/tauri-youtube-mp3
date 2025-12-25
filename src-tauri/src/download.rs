@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::fs;
+use std::collections::HashSet;
 use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tauri::api::path::config_dir;
+use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DownloadResult {
@@ -10,6 +13,23 @@ pub struct DownloadResult {
     pub title: Option<String>,
     pub duration: Option<f64>,
     pub file_size: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlaylistDownloadResult {
+    pub output_folder: String,
+    pub total_videos: usize,
+    pub downloaded_videos: Vec<DownloadResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DownloadProgress {
+    pub overall_progress: f64,        // Overall progress percentage (0-100)
+    pub current_song: Option<usize>,  // Current song number (for playlists)
+    pub total_songs: Option<usize>,   // Total songs (for playlists)
+    pub song_progress: f64,           // Current song download progress (0-100)
+    pub status: String,               // Current status: "downloading", "converting", etc.
+    pub current_title: Option<String>, // Current song title being processed
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -471,6 +491,32 @@ pub async fn download_youtube(
     let duration = video_info["duration"]
         .as_f64();
 
+    // Determine the expected output path
+    let output_path = if let Some(ref t) = title {
+        Path::new(output_folder).join(format!("{}.mp3", t))
+    } else {
+        // Fallback: use video ID or default name
+        let video_id = video_info["id"]
+            .as_str()
+            .unwrap_or("video");
+        Path::new(output_folder).join(format!("{}.mp3", video_id))
+    };
+
+    // Check if file already exists before downloading
+    if output_path.exists() {
+        // File already exists, skip download and return existing file info
+        let file_size = std::fs::metadata(&output_path)
+            .ok()
+            .map(|m| m.len());
+        
+        return Ok(DownloadResult {
+            output_path: output_path.to_string_lossy().to_string(),
+            title,
+            duration,
+            file_size,
+        });
+    }
+
     // Generate output filename template for yt-dlp
     // yt-dlp will use the title and add .mp3 extension
     let output_template = format!("{}/%(title)s.%(ext)s", output_folder);
@@ -491,32 +537,6 @@ pub async fn download_youtube(
         .await
         .map_err(|e| format!("Download failed: {}", e))?;
 
-    // Determine the actual output path
-    // yt-dlp will have created a file with the title as the name
-    let output_path = if let Some(ref t) = title {
-        Path::new(output_folder).join(format!("{}.mp3", sanitize_filename(t)))
-    } else {
-        // Fallback: try to find the most recent .mp3 file in the output folder
-        let mut fallback_path = Path::new(output_folder).join("video.mp3");
-        if let Ok(entries) = std::fs::read_dir(output_folder) {
-            let mut mp3_files: Vec<_> = entries
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path().extension().and_then(|s| s.to_str()) == Some("mp3")
-                })
-                .collect();
-            mp3_files.sort_by_key(|e| {
-                e.metadata()
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-            });
-            if let Some(latest) = mp3_files.last() {
-                fallback_path = latest.path();
-            }
-        }
-        fallback_path
-    };
-
     if !download_output.status.success() {
         let error = String::from_utf8_lossy(&download_output.stderr);
         return Err(format!("Download failed: {}", error));
@@ -535,6 +555,408 @@ pub async fn download_youtube(
     })
 }
 
+/// Download all videos from a YouTube playlist
+pub async fn download_playlist(
+    url: &str,
+    output_folder: &str,
+    bitrate: u32,
+) -> Result<PlaylistDownloadResult, String> {
+    // Validate YouTube URL
+    if !is_youtube_url(url) {
+        return Err("Invalid YouTube URL. Please provide a valid YouTube playlist URL.".to_string());
+    }
+
+    if !is_playlist_url(url) {
+        return Err("URL does not appear to be a playlist URL.".to_string());
+    }
+
+    // Ensure yt-dlp is available (download if necessary)
+    let ytdlp_cmd = match ensure_ytdlp().await {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            return Err(format!(
+                "Failed to setup yt-dlp: {}\n\nPlease install yt-dlp manually:\n{}\n\nOr visit: https://github.com/yt-dlp/yt-dlp",
+                e,
+                get_installation_instructions()
+            ));
+        }
+    };
+
+    // Ensure FFmpeg is available (download if necessary)
+    let _ffmpeg_cmd = match ensure_ffmpeg().await {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            return Err(format!(
+                "Failed to setup FFmpeg: {}\n\nPlease install FFmpeg manually:\n{}\n\nOr visit: https://ffmpeg.org/download.html",
+                e,
+                get_installation_instructions()
+            ));
+        }
+    };
+
+    // Get playlist info to determine the number of videos
+    let info_output = Command::new(&ytdlp_cmd)
+        .arg("--dump-json")
+        .arg("--flat-playlist")
+        .arg(url)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to get playlist info: {}", e))?;
+
+    if !info_output.status.success() {
+        let error = String::from_utf8_lossy(&info_output.stderr);
+        return Err(format!("Failed to get playlist info: {}", error));
+    }
+
+    // Parse playlist entries (one JSON object per line)
+    let output_str = String::from_utf8_lossy(&info_output.stdout);
+    let entries: Vec<serde_json::Value> = output_str
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+
+    let total_videos = entries.len();
+    
+    if total_videos == 0 {
+        return Err("Playlist appears to be empty or could not be accessed.".to_string());
+    }
+
+    // Capture existing files before download to identify newly downloaded files
+    let existing_files: HashSet<String> = if let Ok(entries) = std::fs::read_dir(output_folder) {
+        entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("mp3"))
+            .filter_map(|e| e.path().to_string_lossy().to_string().into())
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
+    // Generate output filename template for yt-dlp
+    // All videos will be downloaded to the same folder
+    let output_template = format!("{}/%(title)s.%(ext)s", output_folder);
+
+    // Download all videos in the playlist
+    // Use --yes-playlist to explicitly allow playlist downloads
+    // Use --no-overwrites to skip files that already exist
+    let download_output = Command::new(&ytdlp_cmd)
+        .arg("-x") // Extract audio
+        .arg("--audio-format")
+        .arg("mp3")
+        .arg("--audio-quality")
+        .arg(format!("{}K", bitrate))
+        .arg("-o")
+        .arg(&output_template)
+        .arg("--yes-playlist") // Explicitly allow playlist downloads
+        .arg("--no-overwrites") // Skip files that already exist
+        .arg(url)
+        .output()
+        .await
+        .map_err(|e| format!("Playlist download failed: {}", e))?;
+
+    if !download_output.status.success() {
+        let error = String::from_utf8_lossy(&download_output.stderr);
+        return Err(format!("Playlist download failed: {}", error));
+    }
+
+    // Collect only newly downloaded files from the output folder
+    let mut downloaded_videos = Vec::new();
+    
+    if let Ok(entries) = std::fs::read_dir(output_folder) {
+        let mp3_files: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path().extension().and_then(|s| s.to_str()) == Some("mp3")
+            })
+            .collect();
+
+        // For each file, check if it's new (wasn't there before download)
+        for entry in mp3_files {
+            let path = entry.path();
+            let path_str = path.to_string_lossy().to_string();
+            
+            // Only include files that weren't there before the download
+            if !existing_files.contains(&path_str) {
+                if let Ok(metadata) = std::fs::metadata(&path) {
+                    let file_size = Some(metadata.len());
+                    let file_name = path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.to_string());
+                    
+                    downloaded_videos.push(DownloadResult {
+                        output_path: path_str,
+                        title: file_name,
+                        duration: None, // We don't parse duration for playlist items
+                        file_size,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(PlaylistDownloadResult {
+        output_folder: output_folder.to_string(),
+        total_videos,
+        downloaded_videos,
+    })
+}
+
+/// Download all videos from a YouTube playlist with progress tracking
+pub async fn download_playlist_with_progress(
+    url: &str,
+    output_folder: &str,
+    bitrate: u32,
+    app_handle: AppHandle,
+) -> Result<PlaylistDownloadResult, String> {
+    // Validate YouTube URL
+    if !is_youtube_url(url) {
+        return Err("Invalid YouTube URL. Please provide a valid YouTube playlist URL.".to_string());
+    }
+
+    if !is_playlist_url(url) {
+        return Err("URL does not appear to be a playlist URL.".to_string());
+    }
+
+    // Ensure yt-dlp is available (download if necessary)
+    let ytdlp_cmd = match ensure_ytdlp().await {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            return Err(format!(
+                "Failed to setup yt-dlp: {}\n\nPlease install yt-dlp manually:\n{}\n\nOr visit: https://github.com/yt-dlp/yt-dlp",
+                e,
+                get_installation_instructions()
+            ));
+        }
+    };
+
+    // Ensure FFmpeg is available (download if necessary)
+    let _ffmpeg_cmd = match ensure_ffmpeg().await {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            return Err(format!(
+                "Failed to setup FFmpeg: {}\n\nPlease install FFmpeg manually:\n{}\n\nOr visit: https://ffmpeg.org/download.html",
+                e,
+                get_installation_instructions()
+            ));
+        }
+    };
+
+    // Get playlist info to determine the number of videos
+    let info_output = Command::new(&ytdlp_cmd)
+        .arg("--dump-json")
+        .arg("--flat-playlist")
+        .arg(url)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to get playlist info: {}", e))?;
+
+    if !info_output.status.success() {
+        let error = String::from_utf8_lossy(&info_output.stderr);
+        return Err(format!("Failed to get playlist info: {}", error));
+    }
+
+    // Parse playlist entries (one JSON object per line)
+    let output_str = String::from_utf8_lossy(&info_output.stdout);
+    let entries: Vec<serde_json::Value> = output_str
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+
+    let total_videos = entries.len();
+    
+    if total_videos == 0 {
+        return Err("Playlist appears to be empty or could not be accessed.".to_string());
+    }
+
+    // Capture existing files before download
+    let existing_files: HashSet<String> = if let Ok(entries) = std::fs::read_dir(output_folder) {
+        entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("mp3"))
+            .filter_map(|e| e.path().to_string_lossy().to_string().into())
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
+    // Generate output filename template
+    let output_template = format!("{}/%(title)s.%(ext)s", output_folder);
+
+    // Spawn yt-dlp process to capture stderr in real-time
+    let mut child = Command::new(&ytdlp_cmd)
+        .arg("-x")
+        .arg("--audio-format")
+        .arg("mp3")
+        .arg("--audio-quality")
+        .arg(format!("{}K", bitrate))
+        .arg("-o")
+        .arg(&output_template)
+        .arg("--yes-playlist")
+        .arg("--no-overwrites")
+        .arg("--newline") // One status output per line
+        .arg(url)
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start download: {}", e))?;
+
+    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+
+    let mut current_song = 0;
+    let mut song_progress = 0.0;
+    let mut status = "Starting...".to_string();
+    let mut current_title: Option<String> = None;
+
+    // Parse stderr line by line for progress updates
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => break, // EOF
+            Ok(_) => {
+                let line = line.trim();
+                
+                // Parse download progress: [download] XX.X% of ...
+                if line.contains("[download]") {
+                    if let Some(percent_str) = line.split_whitespace().find(|s| s.ends_with('%')) {
+                        if let Ok(percent) = percent_str.trim_end_matches('%').parse::<f64>() {
+                            song_progress = percent;
+                            status = "Downloading...".to_string();
+                            
+                            let overall_progress = if total_videos > 0 {
+                                ((current_song as f64 + song_progress / 100.0) / total_videos as f64) * 100.0
+                            } else {
+                                song_progress
+                            };
+
+                            let progress = DownloadProgress {
+                                overall_progress,
+                                current_song: Some(current_song + 1),
+                                total_songs: Some(total_videos),
+                                song_progress,
+                                status: status.clone(),
+                                current_title: current_title.clone(),
+                            };
+                            app_handle.emit_all("download-progress", progress).ok();
+                        }
+                    }
+                }
+                // Parse extract audio status
+                else if line.contains("[ExtractAudio]") || line.contains("[Merger]") {
+                    status = "Converting to MP3...".to_string();
+                    song_progress = 95.0; // Assume conversion is at 95% of song progress
+                    
+                    let overall_progress = if total_videos > 0 {
+                        ((current_song as f64 + 0.95) / total_videos as f64) * 100.0
+                    } else {
+                        95.0
+                    };
+
+                    let progress = DownloadProgress {
+                        overall_progress,
+                        current_song: Some(current_song + 1),
+                        total_songs: Some(total_videos),
+                        song_progress: 95.0,
+                        status: status.clone(),
+                        current_title: current_title.clone(),
+                    };
+                    app_handle.emit_all("download-progress", progress).ok();
+                }
+                // Parse video title from info
+                else if line.contains("Downloading video") || line.contains("Downloading") {
+                    current_song += 1;
+                    song_progress = 0.0;
+                    status = "Starting download...".to_string();
+                    
+                    // Try to extract title if available in the line
+                    if let Some(title_start) = line.find(": ") {
+                        let title = line[title_start + 2..].trim().to_string();
+                        if !title.is_empty() {
+                            current_title = Some(title);
+                        }
+                    }
+                    
+                    let overall_progress = if total_videos > 0 {
+                        ((current_song - 1) as f64 / total_videos as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    let progress = DownloadProgress {
+                        overall_progress,
+                        current_song: Some(current_song),
+                        total_songs: Some(total_videos),
+                        song_progress: 0.0,
+                        status: status.clone(),
+                        current_title: current_title.clone(),
+                    };
+                    app_handle.emit_all("download-progress", progress).ok();
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading stderr: {}", e);
+                break;
+            }
+        }
+    }
+
+    // Wait for process to complete
+    let status_result = child.wait().await.map_err(|e| format!("Failed to wait for process: {}", e))?;
+
+    if !status_result.success() {
+        return Err("Playlist download failed".to_string());
+    }
+
+    // Emit 100% progress
+    let final_progress = DownloadProgress {
+        overall_progress: 100.0,
+        current_song: Some(total_videos),
+        total_songs: Some(total_videos),
+        song_progress: 100.0,
+        status: "Complete!".to_string(),
+        current_title: None,
+    };
+    app_handle.emit_all("download-progress", final_progress).ok();
+
+    // Collect downloaded files
+    let mut downloaded_videos = Vec::new();
+    
+    if let Ok(entries) = std::fs::read_dir(output_folder) {
+        let mp3_files: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("mp3"))
+            .collect();
+
+        for entry in mp3_files {
+            let path = entry.path();
+            let path_str = path.to_string_lossy().to_string();
+            
+            if !existing_files.contains(&path_str) {
+                if let Ok(metadata) = std::fs::metadata(&path) {
+                    let file_size = Some(metadata.len());
+                    let file_name = path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.to_string());
+                    
+                    downloaded_videos.push(DownloadResult {
+                        output_path: path_str,
+                        title: file_name,
+                        duration: None,
+                        file_size,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(PlaylistDownloadResult {
+        output_folder: output_folder.to_string(),
+        total_videos,
+        downloaded_videos,
+    })
+}
+
 /// Validate if the URL is a valid YouTube URL
 /// Supports various YouTube URL formats across different platforms
 fn is_youtube_url(url: &str) -> bool {
@@ -549,7 +971,18 @@ fn is_youtube_url(url: &str) -> bool {
     url_lower.starts_with("https://youtube.com/") ||
     url_lower.starts_with("http://youtube.com/") ||
     url_lower.starts_with("https://youtu.be/") ||
-    url_lower.starts_with("http://youtu.be/")
+    url_lower.starts_with("http://youtu.be/") ||
+    url_lower.contains("youtube.com/playlist")
+}
+
+/// Check if the URL is a YouTube playlist URL
+pub fn is_playlist_url(url: &str) -> bool {
+    let url_lower = url.to_lowercase();
+    // Check for playlist parameter in URL
+    url_lower.contains("list=") && (
+        url_lower.contains("youtube.com/watch") ||
+        url_lower.contains("youtube.com/playlist")
+    )
 }
 
 /// Sanitize filename to be safe for all operating systems

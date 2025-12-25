@@ -15,7 +15,11 @@ fn main() {
             clear_history,
             check_required_dependencies,
             setup_ytdlp,
-            setup_ffmpeg
+            setup_ffmpeg,
+            save_output_folder,
+            get_output_folder,
+            save_preferences,
+            get_preferences
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

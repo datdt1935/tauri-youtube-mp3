@@ -47,5 +47,56 @@
     font-size: 0.9rem;
     color: $color-text-secondary;
   }
+
+  &__playlist-info {
+    margin: 0.75rem 0 0.5rem 0;
+  }
+
+  &__playlist-summary {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: $color-text;
+  }
+
+  &__song-section {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid $color-border;
+  }
+
+  &__song-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  &__song-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: $color-text;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-right: 0.5rem;
+  }
+
+  &__song-percentage {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: $color-primary;
+  }
+
+  &__bar-container--song {
+    height: 6px;
+    margin-bottom: 0;
+  }
+
+  &__bar--song {
+    background: $color-primary;
+    opacity: 0.8;
+  }
 }
 
