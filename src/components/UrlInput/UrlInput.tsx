@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { open } from "@tauri-apps/api/dialog";
 import "./UrlInput.scss";
 
-type UrlInputProps = {
+type Props = {
   url: string;
   outputFolder: string | null;
   bitrate: number;
@@ -22,7 +22,7 @@ export const UrlInput = ({
   onBitrateChange,
   onDownload, 
   disabled = false 
-}: UrlInputProps) => {
+}: Props) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onUrlChange(e.target.value);
   };
@@ -61,7 +61,6 @@ export const UrlInput = ({
 
   const canDownload = Boolean(url.trim() && outputFolder && !disabled);
   
-  // Debug: Log state changes
   useEffect(() => {
     console.log("UrlInput state:", { 
       url: url.trim(), 
@@ -70,7 +69,7 @@ export const UrlInput = ({
       canDownload,
       hasOnDownload: !!onDownload 
     });
-  }, [url, outputFolder, disabled, canDownload, onDownload]);
+  }, [url, outputFolder, disabled, onDownload]);
 
   return (
     <div className="url-input">

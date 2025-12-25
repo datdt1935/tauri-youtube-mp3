@@ -1,11 +1,11 @@
 import "./Progress.scss";
 
-type ProgressProps = {
+type Props = {
   progress: number;
   status: string;
 };
 
-export const Progress = ({ progress, status }: ProgressProps) => {
+export const Progress = ({ progress, status }: Props) => {
   return (
     <div className="progress">
       <div className="progress__header">

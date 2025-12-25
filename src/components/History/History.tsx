@@ -9,12 +9,12 @@ type DownloadHistory = {
   duration?: number;
 };
 
-type HistoryProps = {
+type Props = {
   history: DownloadHistory[];
   onClear: () => void;
 };
 
-export const History = ({ history, onClear }: HistoryProps) => {
+export const History = ({ history, onClear }: Props) => {
   const formatDate = (timestamp: string) => {
     try {
       const date = new Date(timestamp);

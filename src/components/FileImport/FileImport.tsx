@@ -1,13 +1,13 @@
 import { invoke } from "@tauri-apps/api/tauri";
 import "./FileImport.scss";
 
-type FileImportProps = {
+type Props = {
   selectedFile: string | null;
   onFileSelect: (filePath: string) => void;
   disabled?: boolean;
 };
 
-export const FileImport = ({ selectedFile, onFileSelect, disabled = false }: FileImportProps) => {
+export const FileImport = ({ selectedFile, onFileSelect, disabled = false }: Props) => {
   const handleSelectFile = async () => {
     try {
       const filePath = await invoke<string | null>("select_file");

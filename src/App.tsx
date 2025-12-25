@@ -75,7 +75,6 @@ export const App = () => {
     let progressInterval: number | null = null;
 
     try {
-      // Simulate progress (yt-dlp doesn't provide easy real-time progress)
       progressInterval = setInterval(() => {
         setDownloadProgress((prev) => {
           if (prev >= 90) {
@@ -104,10 +103,8 @@ export const App = () => {
       setDownloadProgress(100);
       setDownloadStatus("Download complete!");
       
-      // Clear URL
       setYoutubeUrl("");
       
-      // Reload history
       await loadHistory();
 
       setTimeout(() => {
@@ -115,11 +112,11 @@ export const App = () => {
         setDownloadProgress(0);
         setDownloadStatus("");
       }, 2000);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Download error:", err);
-      let errorMsg = err?.toString() || err?.message || "Download failed";
+      const error = err as Error | { toString?: () => string; message?: string };
+      let errorMsg = error?.toString() || error?.message || "Download failed";
       
-      // Format error message for better display (preserve newlines)
       errorMsg = errorMsg.replace(/\\n/g, '\n');
       
       setError(errorMsg);
@@ -141,11 +138,6 @@ export const App = () => {
 
   return (
     <div className="app">
-      {/* <header className="app__header">
-        <h1 className="app__title">YouTube Downloader</h1>
-        <p className="app__subtitle">Download and convert YouTube videos to MP3</p>
-      </header> */}
-
       <main className="app__main">
         <div className="app__content">
           <UrlInput
