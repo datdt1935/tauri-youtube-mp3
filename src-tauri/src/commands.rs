@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
-use tauri::api::dialog::FileDialogBuilder;
-use tauri::api::path::config_dir;
 use std::fs;
 use std::path::PathBuf;
+use tauri::api::path::config_dir;
 
-use crate::download::{download_youtube, download_playlist_with_progress, DownloadResult, PlaylistDownloadResult, check_dependencies, ensure_ytdlp, ensure_ffmpeg, is_playlist_url};
+use crate::deps;
+use crate::download::{
+    download_playlist_with_progress, download_youtube, is_playlist_url, DownloadResult,
+    PlaylistDownloadResult,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DownloadHistory {
@@ -62,8 +65,7 @@ impl HistoryData {
 }
 
 fn get_history_path() -> Option<PathBuf> {
-    config_dir()
-        .map(|dir| dir.join("youtube-downloader").join("history.json"))
+    config_dir().map(|dir| dir.join("youtube-downloader").join("history.json"))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -107,53 +109,7 @@ impl AppPreferences {
 }
 
 fn get_preferences_path() -> Option<PathBuf> {
-    config_dir()
-        .map(|dir| dir.join("youtube-downloader").join("preferences.json"))
-}
-
-// Removed select_file - no longer needed for YouTube downloader
-
-#[tauri::command]
-pub async fn select_output_folder() -> Result<Option<String>, String> {
-    use std::sync::mpsc;
-    
-    let (tx, rx) = mpsc::channel();
-    let mut result: Option<String> = None;
-    
-    FileDialogBuilder::new()
-        .pick_folder(move |folder_path| {
-            if let Some(path) = folder_path {
-                let path_str = path.to_string_lossy().to_string();
-                let _ = tx.send(path_str);
-            } else {
-                let _ = tx.send(String::new());
-            }
-        });
-    
-    // Try to receive the result
-    // The dialog callback should fire when user selects or cancels
-    match rx.try_recv() {
-        Ok(path) => {
-            if !path.is_empty() {
-                result = Some(path);
-            }
-        },
-        Err(mpsc::TryRecvError::Empty) => {
-            // Dialog might still be open, wait for it
-            // In Tauri v1.5, pick_folder is blocking, so we need to wait
-            match rx.recv() {
-                Ok(path) => {
-                    if !path.is_empty() {
-                        result = Some(path);
-                    }
-                },
-                Err(_) => {}
-            }
-        },
-        Err(_) => {}
-    }
-    
-    Ok(result)
+    config_dir().map(|dir| dir.join("youtube-downloader").join("preferences.json"))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -172,7 +128,9 @@ pub async fn download_from_youtube(
 ) -> Result<DownloadResponse, String> {
     // Check if URL is a playlist
     if is_playlist_url(&url) {
-        let result = download_playlist_with_progress(&url, &output_folder, bitrate, app_handle.clone()).await?;
+        let result =
+            download_playlist_with_progress(&url, &output_folder, bitrate, app_handle.clone())
+                .await?;
 
         // Save each video to history
         let mut history = HistoryData::load();
@@ -192,13 +150,16 @@ pub async fn download_from_youtube(
         let app_name = app_handle.package_info().name.clone();
         tauri::api::notification::Notification::new(&app_name)
             .title("Playlist Download Complete")
-            .body(&format!("Successfully downloaded {} videos from playlist", result.downloaded_videos.len()))
+            .body(&format!(
+                "Successfully downloaded {} videos from playlist",
+                result.downloaded_videos.len()
+            ))
             .show()
             .ok();
 
         Ok(DownloadResponse::Playlist(result))
     } else {
-        let result = download_youtube(&url, &output_folder, bitrate).await?;
+        let result = download_youtube(&url, &output_folder, bitrate, &app_handle).await?;
 
         // Save to history
         let mut history = HistoryData::load();
@@ -236,25 +197,39 @@ pub async fn clear_history() -> Result<(), String> {
     history.save()
 }
 
-/// Check if required dependencies (yt-dlp and ffmpeg) are installed
-/// This should be called at app startup to ensure dependencies are available
 #[tauri::command]
-pub async fn check_required_dependencies() -> Result<crate::download::DependencyCheck, String> {
-    Ok(check_dependencies().await)
+pub async fn check_deps(app_handle: tauri::AppHandle) -> Result<deps::DepsCheckResult, String> {
+    Ok(deps::check_deps(&app_handle))
 }
 
-/// Setup yt-dlp by downloading it if not available
-/// This will automatically download yt-dlp to the app's data directory
 #[tauri::command]
-pub async fn setup_ytdlp() -> Result<String, String> {
-    ensure_ytdlp().await
-}
+pub async fn clear_extracted_binaries(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use std::fs;
 
-/// Setup FFmpeg by downloading it if not available
-/// This will automatically download FFmpeg to the app's data directory
-#[tauri::command]
-pub async fn setup_ffmpeg() -> Result<String, String> {
-    ensure_ffmpeg().await
+    let app_data_dir = app_handle
+        .path_resolver()
+        .app_data_dir()
+        .ok_or("Failed to get app data directory")?;
+
+    let bin_dir = app_data_dir.join("bin");
+
+    if bin_dir.exists() {
+        let entries =
+            fs::read_dir(&bin_dir).map_err(|e| format!("Failed to read bin directory: {}", e))?;
+
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if path.is_file() {
+                    fs::remove_file(&path)
+                        .map_err(|e| format!("Failed to remove {}: {}", path.display(), e))?;
+                    eprintln!("[deps] Removed extracted binary: {}", path.display());
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Save the output folder path to preferences
@@ -297,4 +272,3 @@ pub async fn save_preferences(
 pub async fn get_preferences() -> Result<AppPreferences, String> {
     Ok(AppPreferences::load())
 }
-

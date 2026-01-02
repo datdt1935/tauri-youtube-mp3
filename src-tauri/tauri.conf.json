@@ -50,6 +50,14 @@
         "icons/128x128@2x.png",
         "icons/icon.icns",
         "icons/icon.ico"
+      ],
+      "resources": [
+        "binaries/macos/arm64/yt-dlp",
+        "binaries/macos/arm64/ffmpeg",
+        "binaries/macos/x64/yt-dlp",
+        "binaries/macos/x64/ffmpeg",
+        "binaries/windows/x64/yt-dlp.exe",
+        "binaries/windows/x64/ffmpeg.exe"
       ]
     },
     "security": {

@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod deps;
 mod download;
 
 use commands::*;
@@ -9,13 +10,11 @@ use commands::*;
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            select_output_folder,
             download_from_youtube,
             get_download_history,
             clear_history,
-            check_required_dependencies,
-            setup_ytdlp,
-            setup_ffmpeg,
+            check_deps,
+            clear_extracted_binaries,
             save_output_folder,
             get_output_folder,
             save_preferences,
@@ -24,4 +23,3 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

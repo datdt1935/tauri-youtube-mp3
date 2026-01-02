@@ -1,0 +1,10 @@
+# Placeholder files - replace with actual binaries before building for distribution
+# These empty files allow the build to succeed, but you MUST replace them with real binaries
+
+*.exe
+yt-dlp
+ffmpeg
+
+# Keep this .gitignore but add actual binaries when ready
+# The build will work with placeholders, but the app will fail at runtime if binaries are missing
+
