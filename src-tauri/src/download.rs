@@ -735,7 +735,8 @@ pub async fn download_playlist_with_progress(
     }
 
     // Capture existing files before download
-    let existing_files: HashSet<String> = if let Ok(entries) = std::fs::read_dir(output_folder) {
+    let mut existing_files: HashSet<String> = if let Ok(entries) = std::fs::read_dir(output_folder)
+    {
         entries
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("mp3"))
@@ -982,30 +983,48 @@ pub async fn download_playlist_with_progress(
             .emit_all("download-progress", complete_progress)
             .ok();
 
-        // Find the downloaded file
-        if let Ok(entries) = std::fs::read_dir(output_folder) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("mp3") {
-                    let path_str = path.to_string_lossy().to_string();
-                    if !existing_files.contains(&path_str) {
-                        if let Ok(metadata) = std::fs::metadata(&path) {
-                            let file_size = Some(metadata.len());
-                            let file_name = path
-                                .file_stem()
-                                .and_then(|s| s.to_str())
-                                .map(|s| s.to_string());
-
-                            downloaded_videos.push(DownloadResult {
-                                output_path: path_str,
-                                title: file_name.or(current_title.clone()),
-                                duration: None,
-                                file_size,
-                            });
-                            break; // Found the file for this video
+        // Find the downloaded file - first try the expected path, then search for new files
+        let downloaded_file = if expected_path.exists()
+            && !existing_files.contains(&expected_path.to_string_lossy().to_string())
+        {
+            // Use the expected path if it exists and is new
+            Some(expected_path)
+        } else {
+            // Search for newly created files (in case filename was sanitized differently)
+            let mut found_file: Option<PathBuf> = None;
+            if let Ok(entries) = std::fs::read_dir(output_folder) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) == Some("mp3") {
+                        let path_str = path.to_string_lossy().to_string();
+                        if !existing_files.contains(&path_str) {
+                            found_file = Some(path);
+                            break;
                         }
                     }
                 }
+            }
+            found_file
+        };
+
+        if let Some(downloaded_path) = downloaded_file {
+            let path_str = downloaded_path.to_string_lossy().to_string();
+            if let Ok(metadata) = std::fs::metadata(&downloaded_path) {
+                let file_size = Some(metadata.len());
+                let file_name = downloaded_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string());
+
+                downloaded_videos.push(DownloadResult {
+                    output_path: path_str.clone(),
+                    title: file_name.or(current_title.clone()),
+                    duration: None,
+                    file_size,
+                });
+
+                // Add to existing_files to avoid finding it again in next iteration
+                existing_files.insert(path_str);
             }
         }
     }
